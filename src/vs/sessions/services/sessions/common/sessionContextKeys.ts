@@ -19,6 +19,7 @@ import {
 	SessionSupportsDeleteContext,
 	SessionSupportsMultipleChatsContext,
 	SessionSupportsForkContext,
+	SessionSupportsSideChatContext,
 	SessionSupportsRenameContext,
 	SessionTypeContext,
 	SessionWorkspaceIsVirtualContext,
@@ -44,6 +45,7 @@ interface ISessionContextKeys {
 	readonly isRead: IContextKey<boolean>;
 	readonly supportsMultipleChats: IContextKey<boolean>;
 	readonly supportsFork: IContextKey<boolean>;
+	readonly supportsSideChat: IContextKey<boolean>;
 	readonly supportsRename: IContextKey<boolean>;
 	readonly supportsDelete: IContextKey<boolean>;
 	readonly workspaceIsVirtual: IContextKey<boolean>;
@@ -82,6 +84,7 @@ function getBoundKeys(contextKeyService: IContextKeyService): ISessionContextKey
 			isRead: SessionIsReadContext.bindTo(contextKeyService),
 			supportsMultipleChats: SessionSupportsMultipleChatsContext.bindTo(contextKeyService),
 			supportsFork: SessionSupportsForkContext.bindTo(contextKeyService),
+			supportsSideChat: SessionSupportsSideChatContext.bindTo(contextKeyService),
 			supportsRename: SessionSupportsRenameContext.bindTo(contextKeyService),
 			supportsDelete: SessionSupportsDeleteContext.bindTo(contextKeyService),
 			workspaceIsVirtual: SessionWorkspaceIsVirtualContext.bindTo(contextKeyService),
@@ -127,6 +130,7 @@ export function setSessionContextKeys(session: ISession | undefined, contextKeyS
 	const capabilities = session?.capabilities.read(reader);
 	keys.supportsMultipleChats.set(capabilities?.supportsMultipleChats ?? false);
 	keys.supportsFork.set(capabilities?.supportsFork ?? false);
+	keys.supportsSideChat.set(capabilities?.supportsSideChat ?? false);
 	keys.supportsRename.set(capabilities?.supportsRename ?? false);
 	keys.supportsDelete.set(capabilities?.supportsDelete ?? false);
 	keys.workspaceIsVirtual.set(session?.workspace.read(reader)?.isVirtualWorkspace ?? true);
@@ -150,6 +154,7 @@ export function setSessionContextKeys(session: ISession | undefined, contextKeyS
 	// `workspace === undefined` (which is also transiently true for a
 	// still-resolving workspace session).
 	keys.isQuickChat.set(!!session && (session.isQuickChat?.read(reader) ?? false));
+
 }
 
 /**
@@ -171,7 +176,7 @@ export function setActiveSessionContextKeys(session: IActiveSession | undefined,
 	// real chat. Counts the whole chat list (open or closed) so a committed chat
 	// that was closed still keeps the menu available to reopen it.
 	const committedChatCount = session?.chats.read(reader)
-		.reduce((count, chat) => chat.status.read(reader) === SessionStatus.Untitled || chat.origin?.kind === ChatOriginKind.Tool ? count : count + 1, 0) ?? 0;
+		.reduce((count, chat) => chat.status.read(reader) === SessionStatus.Untitled || chat.origin?.kind === ChatOriginKind.Tool || chat.origin?.kind === ChatOriginKind.SideChat ? count : count + 1, 0) ?? 0;
 	keys.hasMultipleCommittedChats.set(committedChatCount > 1);
 
 	// The tab strip is shown when the session has more than one chat (counting

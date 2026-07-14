@@ -23,12 +23,12 @@ import { join } from '../../../../../base/common/path.js';
 import { removeAnsiEscapeCodes } from '../../../../../base/common/strings.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
-import { SubscribeResult } from '../../../common/state/protocol/commands.js';
+import { ChatSourceKind, SubscribeResult } from '../../../common/state/protocol/commands.js';
 import { PROTOCOL_VERSION } from '../../../common/state/protocol/version/registry.js';
 import {
-	MessageKind,
+	ChatOriginKind, MessageKind,
 	ResponsePartKind, ROOT_STATE_URI, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind,
-	ChatInputResponseKind, ToolResultContentType, ToolCallConfirmationReason, ToolCallCancellationReason, buildDefaultChatUri, buildSubagentSessionUri, parseChatUri,
+	ChatInputResponseKind, ToolResultContentType, ToolCallConfirmationReason, ToolCallCancellationReason, buildChatUri, buildDefaultChatUri, buildSubagentSessionUri, parseChatUri,
 	type MessageAttachment, type ChatInputAnswer, type ChatInputRequest, type ISessionWithDefaultChat, type SessionState, type TerminalState,
 	type ToolResultContent, type ToolResultSubagentContent,
 } from '../../../common/state/sessionState.js';
@@ -178,6 +178,8 @@ export interface IAgentHostE2EProviderConfig {
 	 * session. Claude has not landed subagents yet (Phase 12 in roadmap).
 	 */
 	readonly supportsSubagents: boolean;
+	/** Whether this provider supports side chats. */
+	readonly supportsSideChats?: boolean;
 	/**
 	 * When set, this provider's shell tool call is not reproduced by its bundled
 	 * SDK on Windows during replay (e.g. Codex's `exec_command` yields no
@@ -366,11 +368,26 @@ export async function driveTurnToCompletion(c: TestProtocolClient, session: stri
 	return driveTurn(c, session, turnId, clientSeq, () => dispatchTurn(c, session, turnId, text, clientSeq));
 }
 
+export async function driveChatTurnToCompletion(c: TestProtocolClient, chat: string, turnId: string, text: string, clientSeq: number): Promise<IDrivenTurnResult> {
+	return driveTurn(c, chat, turnId, clientSeq, () => {
+		c.dispatch({
+			channel: chat,
+			clientSeq,
+			action: {
+				type: ActionType.ChatTurnStarted,
+				turnId,
+				startedAt: '2025-01-01T00:00:00.000Z',
+				message: { text, origin: { kind: MessageKind.User } },
+			},
+		});
+	}, chat);
+}
+
 export async function driveTurnWithAttachmentsToCompletion(c: TestProtocolClient, session: string, turnId: string, text: string, attachments: readonly MessageAttachment[], clientSeq: number): Promise<IDrivenTurnResult> {
 	return driveTurn(c, session, turnId, clientSeq, () => dispatchTurnWithAttachments(c, session, turnId, text, attachments, clientSeq));
 }
 
-async function driveTurn(c: TestProtocolClient, session: string, turnId: string, clientSeq: number, dispatch: () => void): Promise<IDrivenTurnResult> {
+async function driveTurn(c: TestProtocolClient, session: string, turnId: string, clientSeq: number, dispatch: () => void, turnChannel: string = buildDefaultChatUri(session)): Promise<IDrivenTurnResult> {
 	c.clearReceived();
 	dispatch();
 
@@ -389,7 +406,7 @@ async function driveTurn(c: TestProtocolClient, session: string, turnId: string,
 		seenNotifications.add(notification as object);
 
 		if (isActionNotification(notification, 'chat/error')) {
-			throw new Error(`Session error while driving ${turnId}`);
+			throw new Error(`Session error while driving ${turnId}: ${JSON.stringify(getActionEnvelope(notification).action)}`);
 		}
 
 		if (isActionNotification(notification, 'chat/toolCallReady')) {
@@ -397,7 +414,7 @@ async function driveTurn(c: TestProtocolClient, session: string, turnId: string,
 			if (!action.confirmed) {
 				sawPendingConfirmation = true;
 				c.dispatch({
-					channel: buildDefaultChatUri(session),
+					channel: turnChannel,
 					clientSeq: nextClientSeq++,
 					action: {
 						type: ActionType.ChatToolCallConfirmed,
@@ -415,7 +432,7 @@ async function driveTurn(c: TestProtocolClient, session: string, turnId: string,
 			sawInputRequest = true;
 			const action = getActionEnvelope(notification).action as ChatInputRequestedAction;
 			c.dispatch({
-				channel: buildDefaultChatUri(session),
+				channel: turnChannel,
 				clientSeq: nextClientSeq++,
 				action: {
 					type: ActionType.ChatInputCompleted,
@@ -754,6 +771,47 @@ export function defineAgentHostE2ETests(config: IAgentHostE2EProviderConfig): vo
 
 			const responseParts = client.receivedNotifications(n => isActionNotification(n, 'chat/responsePart'));
 			assert.ok(responseParts.length > 0, 'should have received at least one response part');
+		});
+
+		(config.supportsSideChats ? test : test.skip)('side chat receives bounded source context without copied history', async function () {
+			this.timeout(180_000);
+
+			const workspaceDir = mkdtempSync(`${tmpdir()}/read-sdk-side-chat`);
+			tempDirs.push(workspaceDir);
+			const sessionUri = await createRealSession(client, config, `real-sdk-side-chat-${config.provider}`, createdSessions, URI.file(workspaceDir));
+			await driveTurnToCompletion(client, sessionUri, 'turn-source', 'Remember the exact token SIDECHAT42 for a later question. Reply with exactly "ready".', 1);
+
+			const sourceChatUri = buildDefaultChatUri(sessionUri);
+			const sideChatUri = buildChatUri(sessionUri, generateUuid());
+			await client.call('createChat', {
+				channel: sessionUri,
+				chat: sideChatUri,
+				source: { kind: ChatSourceKind.SideChat, chat: sourceChatUri, turnId: 'turn-source' },
+			}, 30_000);
+			await client.call<SubscribeResult>('subscribe', { channel: sideChatUri });
+
+			const sideTurn = await driveChatTurnToCompletion(client, sideChatUri, 'turn-side', 'What exact token did I ask you to remember? Reply with only the token.', 2);
+			const [sourceState, sideState] = await Promise.all([
+				fetchSessionWithChat(client, sessionUri),
+				fetchSessionWithChat(client, sideChatUri),
+			]);
+			const sideSummary = sideState.chats.find(chat => chat.resource === sideChatUri);
+
+			assert.deepStrictEqual({
+				responseIncludesCode: /SIDECHAT42/i.test(sideTurn.responseText),
+				sourceTurnCount: sourceState.turns.length,
+				sideTurnCount: sideState.turns.length,
+				origin: sideSummary?.origin,
+				firstMessage: sideState.turns[0]?.message.text,
+				firstAttachments: sideState.turns[0]?.message.attachments ?? [],
+			}, {
+				responseIncludesCode: true,
+				sourceTurnCount: 1,
+				sideTurnCount: 1,
+				origin: { kind: ChatOriginKind.SideChat, chat: sourceChatUri, turnId: 'turn-source' },
+				firstMessage: 'What exact token did I ask you to remember? Reply with only the token.',
+				firstAttachments: [],
+			});
 		});
 
 		test('listModels returns well-shaped model entries after authenticate', async function () {

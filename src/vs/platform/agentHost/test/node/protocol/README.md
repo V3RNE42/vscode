@@ -190,6 +190,7 @@ Guidelines:
 |---|---|
 | `enabled` | Skips the whole suite if the SDK isn't present. |
 | `supportsSubagents` | Gates the two subagent tests. |
+| `supportsSideChats` | Gates the provider-owned side-chat context test (Claude/Copilot only). |
 | `supportsWorktreeIsolation` | Gates the worktree test. |
 | `supportsPlanMode` | Gates the plan-mode test. |
 | `shellPermissionReplayUnstableOnWindows` | Skips the shell-permission test on **Windows** for that provider (e.g. Codex's `exec_command` tool call isn't emitted by the Codex CLI on Windows). |
