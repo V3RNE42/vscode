@@ -4,6 +4,49 @@
 
 ---
 
+## ⚙️ Metodología de Desarrollo (OBLIGATORIA)
+
+### 🔴🟢🔁 TDD — Red-Green-Refactor
+
+Cada línea de código de SafeWriter sigue **Test-Driven Development**:
+
+```
+🔴 RED    → Escribir el test que falla primero (la aserción define el comportamiento esperado)
+🟢 GREEN  → Escribir el código mínimo indispensable para que pase
+🔁 REFACTOR → Limpiar, mantener los tests verdes, repetir
+```
+
+**Regla de hierro:** si no viste el test fallar, no sabes si testea lo correcto.
+
+### 🧪 Test obligatorios
+
+| Tipo | Cobertura mínima | Herramienta |
+|------|:----------------:|-------------|
+| **Unit tests** | Cada función pública del core | Mocha + Chai (VS Code stack) |
+| **Integration tests** | Cada servicio completo (save pipeline, file lock) | VS Code extension tests |
+| **Mutation tests** | Score ≥ 80% en core, ≥ 60% en UI | StrykerJS |
+
+### 🔄 Ralph Loops (Mutation Testing)
+
+Cada servicio/core module debe pasar por el ciclo **Ralph** hasta alcanzar el score objetivo:
+
+```
+1. Ejecutar StrykerJS mutation tests
+2. Identificar "survivors" (mutantes no detectados)
+3. Analizar por qué sobreviven: ¿falta assertion? ¿branch no cubierta?
+4. Añadir tests específicos para matarlos
+5. Re-ejecutar → si score < objetivo, volver al paso 2
+```
+
+| Score | Significado |
+|:----:|-------------|
+| < 60% | Tests débiles — hay que reescribir las aserciones |
+| 60–80% | Aceptable, pero hay que seguir apretando |
+| 80–90% | Bueno — revisar survivors por equivalentes |
+| > 90% | Excelente |
+
+---
+
 ## 🟢 Fase 1 — Safe File Save (Snapshot Inline)
 
 **Objetivo:** Al guardar un archivo de texto, en vez de sobrescribir, appendear una snapshot con timestamp.
@@ -18,12 +61,17 @@ VS Code orquesta el guardado a través de TextFileService. Los archivos clave:
 | `src/vs/workbench/services/textfile/browser/browserTextFileService.ts` | Implementación browser del servicio | Override del método de escritura |
 | `src/vs/workbench/services/textfile/electron-browser/electronTextFileService.ts` | Implementación Electron | Override del método de escritura |
 
-**Tasks:**
-- [ ] Identificar el punto exacto donde `ITextFileService.save()` escribe al disco
-- [ ] Crear `src/vs/workbench/services/safewriter/safeWriterService.ts` — el core del formato `.sw`
-- [ ] Implementar `appendSnapshot()`: lee el contenido actual, genera un bloque con timestamp + contenido, lo appendea al archivo
-- [ ] Implementar `readHistory()`: parsea el archivo y separa contenido actual del historial
-- [ ] Implementar `restoreSnapshot(index)`: reemplaza el contenido actual con una snapshot del historial
+**Tasks (TDD obligatorio en cada una):**
+- [ ] 🔴 Escribir test para `appendSnapshot()` → verlo fallar
+- [ ] 🟢 Implementar `appendSnapshot()` → verlo pasar
+- [ ] 🔁 Refactorizar
+- [ ] 🔴 Escribir test para `readHistory()` → verlo fallar
+- [ ] 🟢 Implementar `readHistory()` → verlo pasar
+- [ ] 🔁 Refactorizar
+- [ ] 🔴 Escribir test para `restoreSnapshot()` → verlo fallar
+- [ ] 🟢 Implementar `restoreSnapshot()` → verlo pasar
+- [ ] 🔁 Refactorizar
+- [ ] 🔄 Ralph Loop sobre fileFormat.ts hasta score ≥ 80%
 
 ### 1.2 Formato SafeWriter
 
@@ -160,4 +208,6 @@ src/vs/workbench/contrib/safewriter/
 └── test/
     ├── historyPanel.test.ts
     └── safeWriterCommands.test.ts
+
+stryker.conf.json              # Config de mutation testing
 ```
