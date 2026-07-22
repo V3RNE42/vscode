@@ -36,6 +36,7 @@ import { IMarkdownString } from '../../../../base/common/htmlContent.js';
 import { IProgress, IProgressService, IProgressStep, ProgressLocation } from '../../../../platform/progress/common/progress.js';
 import { isCancellationError } from '../../../../base/common/errors.js';
 import { TextModelEditSource, EditSources } from '../../../../editor/common/textModelEditSource.js';
+import { appendAndSave } from '../../safewriter/safeWriterService.js';
 
 interface IBackupMetaData extends IWorkingCopyBackupMeta {
 	mtime: number;
@@ -924,6 +925,27 @@ export class TextFileEditorModel extends BaseTextEditorModel implements ITextFil
 
 			// Clear error flag since we are trying to save again
 			this.inErrorMode = false;
+
+			// SafeWriter hook: for .sw files, use appendAndSave instead of textFileService.write
+			const isSwFile = extUri.extname(this.resource) === '.sw';
+			if (isSwFile) {
+				if (this.textEditorModel) {
+					const content = this.textEditorModel.getValue();
+					const filePath = this.resource.fsPath;
+					this.trace(`doSave(${versionId}) - SafeWriter appendAndSave for .sw file`);
+
+					try {
+						await appendAndSave(filePath, content, 'manual');
+
+						// Update stat via file service to get latest metadata
+						const stat = await this.fileService.stat(this.resource);
+						this.handleSaveSuccess(stat, versionId, options);
+					} catch (error) {
+						this.handleSaveError(error instanceof Error ? error : new Error(String(error)), versionId, options);
+					}
+				}
+				return;
+			}
 
 			// Save to Disk. We mark the save operation as currently running with
 			// the latest versionId because it might have changed from a save
