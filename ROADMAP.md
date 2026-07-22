@@ -1,196 +1,193 @@
-# SafeWriter — Hoja de Ruta (basada en código real)
+# SafeWriter — Roadmap con Interdependencias
 
-> Roadmap con los archivos exactos del fork que hay que tocar para convertir VS Code en SafeWriter.
+## ⚡ Metodología de desarrollo (OBLIGATORIA)
 
----
+### TDD obligatorio
 
-## ⚙️ Metodología de Desarrollo (OBLIGATORIA)
-
-### 🔴🟢🔁 TDD — Red-Green-Refactor
-
-Cada línea de código de SafeWriter sigue **Test-Driven Development**:
+Cada función del core sigue **Test-Driven Development**:
 
 ```
-🔴 RED    → Escribir el test que falla primero (la aserción define el comportamiento esperado)
-🟢 GREEN  → Escribir el código mínimo indispensable para que pase
-🔁 REFACTOR → Limpiar, mantener los tests verdes, repetir
+🔴 RED    → Escribir el test que falla primero
+🟢 GREEN  → Código mínimo indispensable para que pase
+🔁 REFACTOR → Limpiar manteniendo todos los tests verdes
 ```
 
 **Regla de hierro:** si no viste el test fallar, no sabes si testea lo correcto.
 
-### 🧪 Test obligatorios
+### Mutation testing (Ralph Loop)
 
-| Tipo | Cobertura mínima | Herramienta |
-|------|:----------------:|-------------|
-| **Unit tests** | Cada función pública del core | Mocha + Chai (VS Code stack) |
-| **Integration tests** | Cada servicio completo (save pipeline, file lock) | VS Code extension tests |
-| **Mutation tests** | Score ≥ 80% en core, ≥ 60% en UI | StrykerJS |
-
-### 🔄 Ralph Loops (Mutation Testing)
-
-Cada servicio/core module debe pasar por el ciclo **Ralph** hasta alcanzar el score objetivo:
+Cada módulo del core pasa por el ciclo **Ralph** con StrykerJS hasta alcanzar el score:
 
 ```
-1. Ejecutar StrykerJS mutation tests
-2. Identificar "survivors" (mutantes no detectados)
-3. Analizar por qué sobreviven: ¿falta assertion? ¿branch no cubierta?
-4. Añadir tests específicos para matarlos
-5. Re-ejecutar → si score < objetivo, volver al paso 2
+StrykerJS → survivors → más tests → StrykerJS → ... → score ≥ 80%
 ```
 
 | Score | Significado |
-|:----:|-------------|
-| < 60% | Tests débiles — hay que reescribir las aserciones |
-| 60–80% | Aceptable, pero hay que seguir apretando |
-| 80–90% | Bueno — revisar survivors por equivalentes |
+|:-----:|-------------|
+| < 60% | Tests débiles — reescribir aserciones |
+| 60-80% | Aceptable pero seguir apretando |
+| 80-90% | Bueno — revisar survivors por equivalentes |
 | > 90% | Excelente |
+
+---
+
+## 📊 Mapa de interdependencias
+
+```
+Fase 1 ─ Safe File Save ──────────────────────────────────────────
+    ↓ depende
+Fase 2 ─ Anti-Delete (necesita Fase 1 para existir)
+    ↓ depende
+Fase 3 ─ Historial UI (necesita Fase 1 + Fase 2)
+    ↓ depende
+Fase 4 ─ Sincronización upstream (paralela a Fase 5)
+    ↓
+Fase 5 ─ Polish (todo lo anterior debe estar estable)
+```
+
+| Fase | Nombre | Depende de | Paralelizable con |
+|------|--------|-----------|-------------------|
+| 1 | Safe File Save | — | — |
+| 2 | Anti-Delete | Fase 1 | — |
+| 3 | Historial UI | Fase 1, Fase 2 | — |
+| 4 | Sync upstream | — | Fase 5 |
+| 5 | Polish | Fase 1, 2, 3 | Fase 4 |
 
 ---
 
 ## 🟢 Fase 1 — Safe File Save (Snapshot Inline)
 
-**Objetivo:** Al guardar un archivo de texto, en vez de sobrescribir, appendear una snapshot con timestamp.
+**Objetivo:** Al guardar un archivo, en vez de sobrescribir, appendear una snapshot completa con timestamp.
 
-### 1.1 Hook en el Save pipeline
+**Dependencias:** Ninguna. Es la base de todo el proyecto.
 
-VS Code orquesta el guardado a través de TextFileService. Los archivos clave:
+### Componentes
 
-| Archivo | Qué hace | Qué cambiar |
-|---------|----------|-------------|
-| `src/vs/workbench/services/textfile/common/textFileService.ts` | Servicio principal de guardado de archivos de texto | Interceptar `save()` y `saveAs()` para que en vez de sobrescribir, llamen a nuestro pipeline de snapshot |
-| `src/vs/workbench/services/textfile/browser/browserTextFileService.ts` | Implementación browser del servicio | Override del método de escritura |
-| `src/vs/workbench/services/textfile/electron-browser/electronTextFileService.ts` | Implementación Electron | Override del método de escritura |
+| Componente | Archivo | Depende de |
+|------------|---------|-----------|
+| Formato .sw | `src/vs/workbench/services/safewriter/fileFormat.ts` | — |
+| SafeWriterService | `src/vs/workbench/services/safewriter/safeWriterService.ts` | fileFormat.ts |
+| Hook en save pipeline | `src/vs/workbench/services/textfile/common/textFileService.ts` | SafeWriterService |
+| Hook en save (browser) | `src/vs/workbench/services/textfile/browser/browserTextFileService.ts` | SafeWriterService |
+| Hook en save (electron) | `src/vs/workbench/services/textfile/electron-browser/electronTextFileService.ts` | SafeWriterService |
+| File read interceptor | `src/vs/platform/files/common/fileService.ts` | fileFormat.ts |
+| Extensión .sw | `extensions/markdown-basics/package.json` | — |
+| Extensión .sw preview | `extensions/markdown-language-features/package.json` | — |
 
-**Tasks (TDD obligatorio en cada una):**
-- [ ] 🔴 Escribir test para `appendSnapshot()` → verlo fallar
-- [ ] 🟢 Implementar `appendSnapshot()` → verlo pasar
-- [ ] 🔁 Refactorizar
-- [ ] 🔴 Escribir test para `readHistory()` → verlo fallar
-- [ ] 🟢 Implementar `readHistory()` → verlo pasar
-- [ ] 🔁 Refactorizar
-- [ ] 🔴 Escribir test para `restoreSnapshot()` → verlo fallar
-- [ ] 🟢 Implementar `restoreSnapshot()` → verlo pasar
-- [ ] 🔁 Refactorizar
-- [ ] 🔄 Ralph Loop sobre fileFormat.ts hasta score ≥ 80%
+### Tasks
 
-### 1.2 Formato SafeWriter
-
-| Archivo | Propósito |
-|---------|-----------|
-| `src/vs/workbench/services/safewriter/fileFormat.ts` | Parser y serializer del formato `.sw` |
-
-Formato:
-```
-=== CONTENIDO ACTUAL ===
-<texto del usuario>
-
-=== SAFEWRITER v1 ===
---- TIMESTAMP: 2026-07-22T10:30:00Z | TIPO: auto | DELTA: +350 ---
-<snapshot>
-
---- TIMESTAMP: 2026-07-22T10:15:00Z | TIPO: manual | DELTA: 0 ---
-<snapshot>
-```
-
-### 1.3 File Read interceptor
-
-| Archivo | Qué cambiar |
-|---------|-------------|
-| `src/vs/platform/files/common/fileService.ts` | Al leer un archivo `.sw`, separar el contenido visible del historial. El editor solo ve el contenido ACTUAL. |
-
-### 1.4 Extensión de formato `.sw`
-
-| Archivo | Qué cambiar |
-|---------|-------------|
-| `extensions/markdown-basics/package.json` | Añadir `.sw` como extensión Markdown soportada |
-| `extensions/markdown-language-features/package.json` | Añadir `.sw` al preview de Markdown |
+- [ ] TDD: `fileFormat.ts` — appendSnapshot()
+- [ ] TDD: `fileFormat.ts` — readHistory()
+- [ ] TDD: `fileFormat.ts` — restoreSnapshot()
+- [ ] Ralph Loop: `fileFormat.ts` → score ≥ 80%
+- [ ] TDD: `safeWriterService.ts` — appendSnapshot() con checksum SHA-256
+- [ ] TDD: `safeWriterService.ts` — readHistory()
+- [ ] TDD: `safeWriterService.ts` — restoreSnapshot()
+- [ ] Ralph Loop: `safeWriterService.ts` → score ≥ 80%
+- [ ] Hook en `textFileService.ts` — interceptar save() y saveAs()
+- [ ] Hook en `browserTextFileService.ts`
+- [ ] Hook en `electronTextFileService.ts`
+- [ ] Interceptor en `fileService.ts` — separar contenido visible de historial al leer .sw
+- [ ] Registrar `.sw` en extensiones Markdown
 
 ---
 
 ## 🟡 Fase 2 — Anti-Delete (Protección de archivos)
 
-**Objetivo:** No se puede eliminar un archivo desde el explorador de SafeWriter. Solo moviendo a la papelera del SO.
+**Objetivo:** No se puede eliminar un archivo desde el explorador de SafeWriter. Solo papelera del SO.
 
-### 2.1 Eliminar el botón de Delete
+**Dependencias:** Necesita Fase 1 (el pipeline de guardado debe existir para que el file locking tenga sentido).
 
-| Archivo | Qué cambiar |
-|---------|-------------|
-| `src/vs/workbench/contrib/files/browser/fileActions.ts` | Aquí se registran las acciones del explorador de archivos. Eliminar/deshabilitar `deleteFileHandler`, `deleteFile` |
-| `src/vs/workbench/contrib/files/browser/explorerView.ts` | El tree view del explorador. Eliminar entrada de menú contextual "Eliminar" para archivos |
-| `src/vs/workbench/contrib/files/browser/fileCommands.ts` | Comandos globales. Desregistrar `deleteFile`, `moveFileToTrash` |
+### Componentes
 
-### 2.2 Read-Only file locking
+| Componente | Archivo | Depende de |
+|------------|---------|-----------|
+| SafeFileLock | `src/vs/platform/files/common/safeFileLock.ts` | — |
+| Quitar botón Delete | `src/vs/workbench/contrib/files/browser/fileActions.ts` | — |
+| Quitar menú contextual | `src/vs/workbench/contrib/files/browser/explorerView.ts` | — |
+| Desregistrar comandos | `src/vs/workbench/contrib/files/browser/fileCommands.ts` | — |
+| Lock post-write | `src/vs/platform/files/node/diskFileService.ts` | safeFileLock.ts |
+| Lock post-write (electron) | `src/vs/platform/files/electron-main/diskFileService.ts` | safeFileLock.ts |
+| Interceptor write() | `src/vs/platform/files/common/io.ts` | safeFileLock.ts |
 
-| Archivo | Qué cambiar |
-|---------|-------------|
-| `src/vs/platform/files/common/io.ts` | Interceptar `write()` para marcar el archivo como solo-lectura tras escribir |
-| `src/vs/platform/files/node/diskFileService.ts` | En Node/Electron: tras cada write, ejecutar `chmod 444` (Linux/macOS) o `SetFileAttributes(readonly)` (Windows) |
-| `src/vs/platform/files/electron-main/diskFileService.ts` | Lo mismo para el proceso electron-main |
+### Tasks
 
-### 2.3 SafeWriter unlock/lock wrapper
-
-| Archivo | Propósito |
-|---------|-----------|
-| `src/vs/platform/files/common/safeFileLock.ts` | Wrapper: desmarca solo-lectura → escribe → remarca solo-lectura. Solo SafeWriter puede hacer esto. |
+- [ ] TDD: `safeFileLock.ts` — lock(), unlock(), isLocked()
+- [ ] Ralph Loop: `safeFileLock.ts` → score ≥ 80%
+- [ ] Integrar lock en diskFileService (write → lock post-write)
+- [ ] Quitar/deshabilitar `deleteFileHandler` en fileActions.ts
+- [ ] Quitar "Eliminar" del menú contextual en explorerView.ts
+- [ ] Desregistrar `deleteFile`, `moveFileToTrash` en fileCommands.ts
+- [ ] Interceptar `write()` en io.ts para safeFileLock
+- [ ] Tests de integración: crear archivo → escribir → verificar solo-lectura → safeFileLock.unlock → reescribir
 
 ---
 
 ## 🟠 Fase 3 — Historial UI (Panel de versiones)
 
-**Objetivo:** Añadir un panel lateral donde se vean todas las snapshots con su timestamp, y se pueda restaurar cualquiera con un clic.
+**Objetivo:** Panel lateral con lista de snapshots. Restauración con 1 clic.
 
-### 3.1 Nuevo panel
+**Dependencias:** Fase 1 (necesita el formato de snapshot) + Fase 2 (protección contra borrado accidental).
 
-| Archivo | Propósito |
-|---------|-----------|
-| `src/vs/workbench/contrib/safewriter/browser/historyPanel.ts` | Panel lateral con la lista de snapshots |
-| `src/vs/workbench/contrib/safewriter/browser/historyPanel.contribution.ts` | Registrar el panel en la workbench |
-| `src/vs/workbench/contrib/safewriter/browser/media/historyPanel.css` | Estilos del panel |
+### Componentes
 
-### 3.2 Comandos
+| Componente | Archivo | Depende de |
+|------------|---------|-----------|
+| HistoryPanel | `src/vs/workbench/contrib/safewriter/browser/historyPanel.ts` | safeWriterService |
+| Contribución panel | `src/vs/workbench/contrib/safewriter/browser/historyPanel.contribution.ts` | HistoryPanel |
+| Estilos | `src/vs/workbench/contrib/safewriter/browser/media/historyPanel.css` | — |
+| Comandos | `src/vs/workbench/contrib/safewriter/browser/safeWriterCommands.ts` | safeWriterService |
+| AutoSaveConfig | `src/vs/workbench/contrib/safewriter/browser/autoSaveConfig.ts` | safeWriterService |
+| AutoSaveScheduler | `src/vs/workbench/services/safewriter/autoSaveScheduler.ts` | safeWriterService |
 
-| Archivo | Propósito |
-|---------|-----------|
-| `src/vs/workbench/contrib/safewriter/browser/safeWriterCommands.ts` | Comandos: `safewriter.restoreSnapshot`, `safewriter.viewHistory` |
+### Tasks
 
-### 3.3 Auto-guardado configurable
-
-| Archivo | Propósito |
-|---------|-----------|
-| `src/vs/workbench/contrib/safewriter/browser/autoSaveConfig.ts` | UI de configuración: auto-guardado cada N chars, cada N minutos, o desactivado |
-| `src/vs/workbench/services/safewriter/autoSaveScheduler.ts` | Timer-based + character-delta watcher que dispara `appendSnapshot()` |
+- [ ] TDD: autoSaveScheduler.ts — timer-based + character-delta watcher
+- [ ] Ralph Loop: autoSaveScheduler.ts → score ≥ 80%
+- [ ] Implementar historyPanel.ts — lista de snapshots, botón restaurar
+- [ ] Registrar panel en la workbench
+- [ ] Implementar safeWriterCommands.ts — restoreSnapshot, viewHistory
+- [ ] Implementar autoSaveConfig.ts — cada N chars, cada N min, off
+- [ ] Tests de integración: guardar 3 veces → panel muestra 3 snapshots → restaurar la 1ª
 
 ---
 
-## 🔵 Fase 4 — Pull Requests y sincronización con upstream
+## 🔵 Fase 4 — Sincronización upstream
 
 **Objetivo:** Mantener el fork sincronizable con microsoft/vscode minimizando conflictos.
 
-- [ ] Mantener los cambios en ramas separadas (`safe-save`, `anti-delete`, `history-panel`)
-- [ ] No tocar archivos que no sean estrictamente necesarios
-- [ ] Merge regular de `upstream/main` → `main`
-- [ ] CI adaptado para construir solo los binarios necesarios
+**Dependencias:** Ninguna de código. Puede correr en paralelo con Fase 5.
+
+| Tarea | Descripción |
+|-------|-------------|
+| Ramas separadas | `safe-save`, `anti-delete`, `history-panel`, `main` |
+| No tocar archivos ajenos | Los cambios se limitan a `src/vs/workbench/services/safewriter/` y `src/vs/workbench/contrib/safewriter/` |
+| Merge periódico | `git merge upstream/main` en `main`, luego rebase de ramas feature |
+| CI adaptado | Build solo los binarios necesarios, ignorar tests rotos de upstream |
 
 ---
 
 ## 🟣 Fase 5 — Polish
 
-| Feature | Archivos |
-|---------|----------|
-| Modo "sin distracciones" forzado al abrir `.sw` | `src/vs/workbench/contrib/safewriter/browser/zenMode.ts` |
-| Estadísticas de escritura (pal/día, sesiones) | `src/vs/workbench/contrib/safewriter/browser/stats.ts` |
-| Exportar: aplanar archivo (quitar historial) | Extensión del safeWriterService |
-| Comprimir snapshots viejos | safeWriterService + config |
-| Búsqueda en historial | historyPanel.ts |
-| Integridad: checksums SHA-256 en cada snapshot | fileFormat.ts |
+**Objetivo:** Experiencia de escritura pulida.
+
+**Dependencias:** Fase 1, 2, 3 completas y estables.
+
+| Feature | Archivo | Depende de |
+|---------|---------|-----------|
+| Modo zen forzado al abrir .sw | `src/vs/workbench/contrib/safewriter/browser/zenMode.ts` | Fase 1 |
+| Estadísticas (pal/día, sesiones) | `src/vs/workbench/contrib/safewriter/browser/stats.ts` | safeWriterService |
+| Exportar: aplanar archivo | Extensión de safeWriterService | Fase 1 |
+| Comprimir snapshots viejos | safeWriterService + config | Fase 1 |
+| Búsqueda en historial | historyPanel.ts | Fase 3 |
 
 ---
 
-## 📁 Árbol completo de archivos nuevos del fork
+## 📁 Árbol completo del fork
 
 ```
 src/vs/workbench/services/safewriter/
-├── safeWriterService.ts      # Core: appendSnapshot, readHistory, restoreSnapshot
+├── safeWriterService.ts       # Core: appendSnapshot, readHistory, restoreSnapshot
 ├── fileFormat.ts              # Parser/serializer del formato .sw
 ├── autoSaveScheduler.ts       # Timer + character-delta watcher
 └── safeFileLock.ts            # Unlock → write → relock
@@ -202,12 +199,13 @@ src/vs/workbench/contrib/safewriter/
 │   ├── safeWriterCommands.ts             # Comandos del fork
 │   ├── autoSaveConfig.ts                 # UI de configuración
 │   ├── zenMode.ts                        # Modo sin distracciones forzado
-│   ├── stats.ts                          # Estadísticas de escritura
+│   └── stats.ts                          # Estadísticas de escritura
 │   └── media/
 │       └── historyPanel.css
 └── test/
+    ├── fileFormat.test.ts
+    ├── safeWriterService.test.ts
+    ├── safeFileLock.test.ts
     ├── historyPanel.test.ts
     └── safeWriterCommands.test.ts
-
-stryker.conf.json              # Config de mutation testing
 ```
