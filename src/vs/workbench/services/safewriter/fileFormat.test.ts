@@ -5,6 +5,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { appendSnapshot, parseSwFile, type SwDocument } from './fileFormat.ts';
 
 void describe('fileFormat', () => {
@@ -115,8 +116,47 @@ Hello world`;
       assert.ok(parsed.history.length >= 1);
     });
 
+    void it('parses type correctly from header', () => {
+      const input = `=== CONTENIDO ACTUAL ===
+test
+
+=== SAFEWRITER v1 ===
+--- TIMESTAMP: 2026-07-22T10:00:00.000Z | TIPO: auto | DELTA: +4 | SHA256: abc ---
+test`;
+      const doc = parseSwFile(input);
+      assert.equal(doc.history[0].type, 'auto');
+    });
+
     void it('throws on invalid format', () => {
       assert.throws(() => parseSwFile('garbage content'), /Invalid/);
+    });
+  });
+
+  void describe('sha256 verification', () => {
+    void it('produces correct SHA256 for known content', () => {
+      const content = 'Contenido de prueba con acentos: áéíóú';
+      const expectedHash = createHash('sha256').update(content).digest('hex');
+
+      const doc: SwDocument = { currentContent: content, history: [] };
+      const result = appendSnapshot(doc, 'manual');
+
+      const match = result.match(/SHA256:\s*([a-f0-9]{64})/);
+      assert.ok(match, 'SHA256 field must be present');
+      assert.equal(match[1], expectedHash,
+        'SHA256 must be the actual hash of the content, not a fake/empty hash');
+    });
+
+    void it('produces different hashes for different content', () => {
+      const doc1: SwDocument = { currentContent: 'AAA', history: [] };
+      const doc2: SwDocument = { currentContent: 'BBB', history: [] };
+
+      const r1 = appendSnapshot(doc1, 'manual');
+      const r2 = appendSnapshot(doc2, 'manual');
+
+      const sha1 = r1.match(/SHA256:\s*([a-f0-9]{64})/)![1];
+      const sha2 = r2.match(/SHA256:\s*([a-f0-9]{64})/)![1];
+
+      assert.notEqual(sha1, sha2, 'Different content must produce different SHA256 hashes');
     });
   });
 });
