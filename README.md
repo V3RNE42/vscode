@@ -49,6 +49,38 @@ Cada vez que se guarda:
 
 ---
 
+## ⚙️ Cómo se desarrolla
+
+### 🔴🟢🔁 TDD — Red-Green-Refactor (OBLIGATORIO)
+
+Cada función del core se construye con Test-Driven Development:
+
+```
+🔴 RED    → Escribir el test que falla primero
+🟢 GREEN  → Código mínimo para que pase
+🔁 REFACTOR → Limpiar manteniendo tests verdes
+```
+
+### 🧪 Testing obligatorio
+
+| Tipo | Cobertura mínima | Herramienta |
+|------|:----------------:|-------------|
+| Unit tests | Cada función pública | Mocha + Chai (VS Code stack) |
+| Integration tests | Cada servicio completo | VS Code extension tests |
+| Mutation tests | Core ≥ 80%, UI ≥ 60% | StrykerJS |
+
+### 🔄 Ralph Loops
+
+Cada módulo del core pasa por el ciclo de mutation testing hasta alcanzar el score:
+
+```
+StrykerJS → survivors → más tests → StrykerJS → ... → score ≥ 80%
+```
+
+Ver [ROADMAP.md](ROADMAP.md) para la hoja de ruta completa con archivos exactos.
+
+---
+
 ## 🚀 Quick Start (próximamente)
 
 ```bash
@@ -64,10 +96,3 @@ yarn compile
 ## 📄 Licencia
 
 Microsoft [MIT](LICENSE.txt). Este proyecto mantiene la misma licencia que VS Code.
-
----
-
-## 🔗 Enlaces
-
-- [Repositorio original (microsoft/vscode)](https://github.com/microsoft/vscode)
-- [Roadmap del fork](ROADMAP.md)
