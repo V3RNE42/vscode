@@ -1,98 +1,115 @@
-# SafeWriter Editor — Fork de VS Code para Escritores
+# SafeWriter Editor
 
-[![Forked from microsoft/vscode](https://img.shields.io/badge/fork-microsoft%2Fvscode-blue.svg)](https://github.com/microsoft/vscode)
+**SafeWriter** es un fork de [Visual Studio Code](https://github.com/microsoft/vscode) diseñado para **escritores de libros** que necesitan protección absoluta contra pérdida de datos.
 
-**SafeWriter** es un fork de [Visual Studio Code (Code - OSS)](https://github.com/microsoft/vscode) diseñado específicamente para **escritores de libros** que necesitan protección absoluta contra pérdida de datos.
-
-Cada archivo contiene TODO su historial de cambios con timestamps, incrustado dentro del propio archivo. No hay Git, no hay nube, no hay sorpresas.
+## Intento original
 
 > *"Mi padre borra todo de golpe y guarda accidentalmente. Quiero que eso nunca más sea un problema."*
 
----
+Los escritores no usan Git. No hacen commit. No tienen staging area. Cuando escriben una novela, el archivo ES el libro. Si se borra el contenido y se guarda, se pierde todo.
 
-## 🎯 ¿Qué cambia respecto a VS Code?
+SafeWriter resuelve esto cambiando la semántica de guardado: **cada vez que guardas, no sobrescribes — appendeas.**
 
-| Aspecto | VS Code original | SafeWriter |
-|---------|:----------------:|:----------:|
-| Guardar archivo | Sobrescribe | Appendea snapshot + timestamp al mismo archivo |
-| Eliminar archivo | Botón en explorador | No existe — solo desde la papelera del sistema |
-| Previsualización Markdown | ✅ | ✅ (igual) |
-| Temas, atajos, editor | ✅ | ✅ (igual) |
-| Historial de cambios | En carpeta `.git/` separada | **Dentro del archivo** — viaja con él |
-| Destinatario | Programadores | Escritores no-técnicos |
+## El principio fundamental
 
-El resto del editor (pestañas, explorador, Markdown preview, temas, extensiones, etc.) funciona exactamente igual.
+| Principio | Significado |
+|-----------|-------------|
+| **El archivo es el historial** | Cada archivo `.sw` contiene todas sus versiones anteriores dentro de sí mismo. No depende de Git, ni de la nube, ni de configuraciones externas. |
+| **No se puede perder** | Aunque borres todo el contenido visible y guardes, las snapshots anteriores siguen intactas dentro del archivo. |
+| **Portable** | Copias el archivo a un USB, lo abres en otro ordenador, y todo el historial viaja con él. |
+| **No técnico** | El escritor no necesita saber qué es un "snapshot", "commit" o "branch". Simplemente escribe y guarda. |
 
----
+## Especificaciones generales
 
-## 🧠 Cómo funciona
+### Formato de archivo
 
-SafeWriter cambia el formato de guardado. Un archivo `.sw` tiene esta pinta:
+Los archivos `.sw` (SafeWriter) tienen esta estructura:
 
 ```
-# Capítulo 1
-
-Era una noche oscura... [contenido actual visible]
+=== CONTENIDO ACTUAL ===
+<texto visible del escritor>
 
 === SAFEWRITER v1 ===
---- 2026-07-22 10:30 | auto | +350 chars ---
-[texto completo del archivo en ese momento]
+--- TIMESTAMP: 2026-07-22T10:30:00Z | TIPO: auto | DELTA: +350 | SHA256: a1b2c3... ---
+<snapshot completa del archivo en ese momento>
 
---- 2026-07-22 10:15 | manual | 0 chars ---
-[texto completo del archivo en ese momento]
+--- TIMESTAMP: 2026-07-22T10:15:00Z | TIPO: manual | DELTA: 0 | SHA256: d4e5f6... ---
+<snapshot completa del archivo en ese momento>
 ```
 
-Cada vez que se guarda:
-1. Se **appendea una snapshot completa** con timestamp al final del archivo
-2. Si se borra todo y se guarda → la snapshot nueva está vacía, **las anteriores siguen ahí**
-3. El archivo se marca **solo-lectura** en disco — solo SafeWriter puede modificarlo
+- El editor solo muestra el bloque `CONTENIDO ACTUAL`
+- El bloque `SAFEWRITER v1` contiene el historial completo
+- Cada snapshot lleva su timestamp, tipo (auto/manual), delta de caracteres, y checksum SHA-256
+- Las snapshots son **completas** (no diffs) para facilitar restauración e integridad
 
----
-
-## ⚙️ Cómo se desarrolla
-
-### 🔴🟢🔁 TDD — Red-Green-Refactor (OBLIGATORIO)
-
-Cada función del core se construye con Test-Driven Development:
+### Pipeline de guardado
 
 ```
-🔴 RED    → Escribir el test que falla primero
-🟢 GREEN  → Código mínimo para que pase
-🔁 REFACTOR → Limpiar manteniendo tests verdes
+Usuario guarda (Ctrl+S / auto-save)
+       ↓
+1. SafeWriterService.appendSnapshot()
+       ↓
+2. Leer archivo actual completo
+3. Generar checksum SHA-256 del contenido actual
+4. Formatear entrada de historial con timestamp + checksum
+5. Appendear al final del archivo
+6. SafeFileLock.unlock() → write() → SafeFileLock.relock()
+       ↓
+   Archivo marcado solo-lectura en disco (chmod 444 / FILE_ATTRIBUTE_READONLY)
 ```
 
-### 🧪 Testing obligatorio
-
-| Tipo | Cobertura mínima | Herramienta |
-|------|:----------------:|-------------|
-| Unit tests | Cada función pública | Mocha + Chai (VS Code stack) |
-| Integration tests | Cada servicio completo | VS Code extension tests |
-| Mutation tests | Core ≥ 80%, UI ≥ 60% | StrykerJS |
-
-### 🔄 Ralph Loops
-
-Cada módulo del core pasa por el ciclo de mutation testing hasta alcanzar el score:
+### Pipeline de lectura
 
 ```
-StrykerJS → survivors → más tests → StrykerJS → ... → score ≥ 80%
+Usuario abre archivo .sw
+       ↓
+1. FileService.read() interceptado para .sw
+2. Separar contenido visible (primer bloque) del historial
+3. Devolver solo contenido visible al editor
+4. Historial disponible en panel lateral
+       ↓
+   Editor ve solo el texto actual. El historial viaja oculto.
 ```
 
-Ver [ROADMAP.md](ROADMAP.md) para la hoja de ruta completa con archivos exactos.
+### Integridad
 
----
+- Cada snapshot incluye SHA-256 del contenido en ese momento
+- Al restaurar una snapshot, se verifica el checksum
+- Si un archivo está dañado, el resto de snapshots siguen siendo recuperables
+- Compresión opcional de snapshots viejos (configurable)
 
-## 🚀 Quick Start (próximamente)
+### Stack técnico
 
-```bash
-git clone https://github.com/V3RNE42/vscode
-cd vscode
-yarn install
-yarn compile
-./scripts/code.sh
+| Capa | Tecnología |
+|------|-----------|
+| Editor base | VS Code (Code - OSS) |
+| Lenguaje | TypeScript |
+| UI | Web + Electron |
+| Tests unitarios | Mocha + Chai |
+| Tests integración | VS Code extension test runner |
+| Mutation testing | StrykerJS |
+
+## Archivos clave del fork
+
+Los cambios se limitan a estos archivos. El resto del código permanece idéntico a upstream.
+
+```
+src/vs/workbench/services/safewriter/
+├── safeWriterService.ts       # Core: appendSnapshot, readHistory, restoreSnapshot
+├── fileFormat.ts              # Parser/serializer del formato .sw
+└── safeFileLock.ts            # Unlock → write → relock
+
+src/vs/workbench/contrib/safewriter/
+└── browser/
+    ├── historyPanel.ts               # Panel lateral de snapshots
+    ├── safeWriterCommands.ts         # Comandos del fork
+    ├── autoSaveConfig.ts            # Config de auto-guardado
+    ├── zenMode.ts                    # Modo sin distracciones forzado
+    └── stats.ts                      # Estadísticas de escritura
 ```
 
----
+Ver [ROADMAP.md](ROADMAP.md) para la secuencia de implementación con interdependencias.
 
-## 📄 Licencia
+## Licencia
 
-Microsoft [MIT](LICENSE.txt). Este proyecto mantiene la misma licencia que VS Code.
+[MIT](LICENSE.txt) — misma que VS Code.
